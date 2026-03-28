@@ -48,6 +48,14 @@ export default function App() {
     })
   }
 
+  function handleStop() {
+    stopLoop()
+    stop()
+    isSpeakingRef.current = false
+    isAskingRef.current = false
+    setMode('idle')
+  }
+
   async function handleAskTap() {
     // if currently listening — stop recording
     if (mode === 'listening') {
@@ -122,6 +130,15 @@ export default function App() {
       )}
 
       <AskButton mode={mode} onTap={handleAskTap} />
+      {mode !== 'idle' && (
+        <button
+          onClick={handleStop}
+          className="absolute top-6 right-6 bg-white/20 
+               text-white text-sm px-4 py-2 rounded-full"
+        >
+          Stop
+        </button>
+      )}
     </div>
   )
 }
