@@ -17,6 +17,9 @@ export function useCamera() {
         const video = videoRef.current
         const canvas = canvasRef.current
 
+        // safety check — don't capture if video isn't ready
+        if (!video || !canvas || video.videoWidth === 0) return null
+
         canvas.width = video.videoWidth
         canvas.height = video.videoHeight
 
@@ -30,6 +33,7 @@ export function useCamera() {
     function startLoop(onFrame) {
         intervalRef.current = setInterval(() => {
             const frame = captureFrame()
+            if (!frame) return  // skip if video not ready yet
             onFrame(frame)
         }, 3000)
     }
