@@ -12,6 +12,7 @@ export default function App() {
       <p className="text-gray-400 text-sm">
         Mode: {mode}
       </p>
+
       <button
         className="w-24 h-24 rounded-full bg-white 
                    text-black font-medium active:scale-95 
