@@ -3,6 +3,7 @@ import { useRef } from 'react'
 export function useCamera() {
     const videoRef = useRef(null)
     const canvasRef = useRef(null)
+    const intervalRef = useRef(null)
 
     async function startCamera() {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -26,5 +27,17 @@ export function useCamera() {
         return base64
     }
 
-    return { videoRef, canvasRef, startCamera, captureFrame }
+    function startLoop(onFrame) {
+        intervalRef.current = setInterval(() => {
+            const frame = captureFrame()
+            onFrame(frame)
+        }, 3000)
+    }
+
+    function stopLoop() {
+        clearInterval(intervalRef.current)
+        intervalRef.current = null
+    }
+
+    return { videoRef, canvasRef, startCamera, captureFrame, startLoop, stopLoop }
 }

@@ -4,18 +4,16 @@ import CameraView from './components/CameraView'
 
 export default function App() {
   const [mode, setMode] = useState('idle')
-  const { videoRef, canvasRef, startCamera, captureFrame } = useCamera()
+  const { videoRef, canvasRef, startCamera, captureFrame, startLoop, stopLoop } = useCamera()
 
   async function handleStart() {
     await startCamera()
     setMode('navigating')
 
-    // // TEMPORARY TEST 
-    // setTimeout(() => {
-    //   const frame = captureFrame()
-    //   console.log('Frame captured, length:', frame.length)
-    //   console.log('Starts with:', frame.substring(0, 50))
-    // }, 1000)
+    startLoop((frame) => {
+      // console.log('New frame at:', new Date().toLocaleTimeString())
+      // console.log('Frame size:', frame.length, 'chars')
+    })
   }
 
   return (
