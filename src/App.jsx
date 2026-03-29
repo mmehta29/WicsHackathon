@@ -5,24 +5,41 @@ import { useTTS } from './hooks/useTTS'
 import { useSTT } from './hooks/useSTT'
 import CameraView from './components/CameraView'
 import StatusBanner from './components/StatusBanner'
-import AskButton from './components/AskButton'
 
 export default function App() {
   const [mode, setMode] = useState('idle')
   const [error, setError] = useState(null)
-  const { videoRef, canvasRef, startCamera, startLoop, stopLoop, captureFrame } = useCamera()
+  const { videoRef, canvasRef, startCamera, startLoop, captureFrame } = useCamera()
   const { analyzeFrame } = useVisionAI()
   const { speak, stop, unlock } = useTTS()
   const { startRecording, stopRecording, transcript, isTranscribing } = useSTT()
 
   const isSpeakingRef = useRef(false)
   const isAskingRef = useRef(false)
+  const lastTapRef = useRef(0)
+  const DOUBLE_TAP_DELAY = 300
+
+  // detect double tap anywhere on screen
+  function handleScreenTap() {
+    const now = Date.now()
+    const timeSinceLastTap = now - lastTapRef.current
+    lastTapRef.current = now
+
+    if (timeSinceLastTap < DOUBLE_TAP_DELAY) {
+      // double tap detected
+      handleDoubleTap()
+    } else if (mode === 'idle') {
+      // single tap on idle — start the app
+      handleStart()
+    }
+  }
 
   async function handleStart() {
     try {
       unlock()
       await startCamera()
       setMode('navigating')
+      await speak('VoiceGuide started. Navigating.')
 
       startLoop(async (frame) => {
         if (isSpeakingRef.current || isAskingRef.current) return
@@ -48,42 +65,37 @@ export default function App() {
         })
       })
     } catch (err) {
-      setError('Camera access denied. Please allow camera permission and try again.')
+      setError('Camera access denied. Please allow camera and try again.')
     }
   }
 
-  function handleStop() {
-    stopLoop()
-    stop()
-    isSpeakingRef.current = false
-    isAskingRef.current = false
-    setMode('idle')
-  }
+  async function handleDoubleTap() {
+    // if idle — ignore double tap
+    if (mode === 'idle') return
 
-  async function handleAskTap() {
-    // if currently listening — stop recording
-    if (mode === 'listening') {
-      stopRecording()
-      return
-    }
-
-    // if navigating — start asking
+    // if navigating — start Ask
     if (mode === 'navigating') {
       isAskingRef.current = true
-      stop() // stop any current navigation audio
+      stop()
       setMode('listening')
-
+      await speak('Listening')
       try {
         await startRecording()
       } catch (err) {
-        console.error('Mic error:', err)
+        await speak('Microphone access denied.')
         setMode('navigating')
         isAskingRef.current = false
       }
+      return
+    }
+
+    // if listening — stop recording
+    if (mode === 'listening') {
+      stopRecording()
     }
   }
 
-  // watch for transcript to be ready after recording stops
+  // watch for transcript after recording stops
   useEffect(() => {
     if (!isTranscribing && transcript && mode === 'listening') {
       handleAnswer(transcript)
@@ -92,62 +104,53 @@ export default function App() {
 
   async function handleAnswer(question) {
     setMode('answering')
+    await speak('Got it, finding answer.')
 
     try {
-      // capture current frame
       const frame = captureFrame()
       if (!frame) throw new Error('No frame available')
 
-      // get answer from GPT-4o
       const result = await analyzeFrame(frame, 'ask', question)
 
-      // speak the answer
       isSpeakingRef.current = true
       await speak(result.text)
 
     } catch (err) {
       console.error('Answer error:', err)
+      await speak('Sorry, could not get an answer. Try again.')
     } finally {
       isSpeakingRef.current = false
       isAskingRef.current = false
       setMode('navigating')
+      speak('Resuming navigation.')
     }
   }
 
   return (
-    <div className="relative w-screen h-screen bg-black">
+    <div
+      className="relative w-screen h-screen bg-black"
+      onClick={handleScreenTap}
+    >
       <CameraView videoRef={videoRef} canvasRef={canvasRef} />
       <StatusBanner mode={mode} />
 
       {mode === 'idle' && (
-        <div className="absolute inset-0 flex flex-col items-center 
-                  justify-center gap-6 p-8">
+        <div className="absolute inset-0 flex flex-col 
+                        items-center justify-center gap-6 p-8">
           {error && (
             <div className="bg-red-500/80 text-white text-sm 
-                      px-4 py-3 rounded-xl text-center">
+                            px-4 py-3 rounded-xl text-center">
               {error}
             </div>
           )}
-          <button
-            onClick={handleStart}
-            className="w-24 h-24 rounded-full bg-white 
-                 text-black font-medium active:scale-95 
-                 transition-transform"
-          >
-            Start
-          </button>
+          <p className="text-white text-xl font-medium 
+                        text-center">
+            Tap anywhere to start
+          </p>
+          <p className="text-white/50 text-sm text-center">
+            Double tap to ask a question
+          </p>
         </div>
-      )}
-
-      <AskButton mode={mode} onTap={handleAskTap} />
-      {mode !== 'idle' && (
-        <button
-          onClick={handleStop}
-          className="absolute top-6 right-6 bg-white/20 
-               text-white text-sm px-4 py-2 rounded-full"
-        >
-          Stop
-        </button>
       )}
     </div>
   )
