@@ -12,7 +12,7 @@ export async function describeScene(base64Jpeg) {
     },
     body: JSON.stringify({
       model: 'gpt-4o-mini',
-      max_tokens: 80,
+      max_tokens: 40,
       messages: [
         {
           role: 'user',

@@ -11,7 +11,7 @@ export default function App() {
   const [error, setError] = useState(null)
   const { videoRef, canvasRef, startCamera, startLoop, captureFrame } = useCamera()
   const { analyzeFrame } = useVisionAI()
-  const { speak, stop, unlock } = useTTS()
+  const { speak, speakNavigate, stop, unlock } = useTTS()
   const { startRecording, stopRecording, transcript, isTranscribing } = useSTT()
 
   const isSpeakingRef = useRef(false)
@@ -39,27 +39,22 @@ export default function App() {
       await speak('VoiceGuide started. Navigating.')
 
       startLoop(async (frame) => {
-        if (isSpeakingRef.current || isAskingRef.current) return
+        // use window.speechSynthesis.speaking so the check is always live —
+        // isSpeakingRef can't track browser speechSynthesis state reliably
+        if (window.speechSynthesis.speaking || isAskingRef.current) return
 
         const result = await analyzeFrame(frame, 'navigate')
 
         if (result.isClear) return
 
         if (result.isAlert) {
-          stop()
-          isSpeakingRef.current = true
-          try {
-            await speak(result.text)
-          } finally {
-            isSpeakingRef.current = false
-          }
+          // urgent: cuts any current speech immediately
+          speakNavigate(result.text, { urgent: true })
           return
         }
 
-        isSpeakingRef.current = true
-        speak(result.text).finally(() => {
-          isSpeakingRef.current = false
-        })
+        // non-urgent: speakNavigate drops it if already speaking (no clash, no queue)
+        speakNavigate(result.text)
       })
     } catch (err) {
       setError('Camera access denied. Please allow camera and try again.')
@@ -130,15 +125,15 @@ export default function App() {
       <StatusBanner mode={mode} />
 
       {mode === 'idle' && (
-        <div className="absolute inset-0 flex flex-col 
+        <div className="absolute inset-0 flex flex-col
                         items-center justify-center gap-6 p-8">
           {error && (
-            <div className="bg-red-500/80 text-white text-sm 
+            <div className="bg-red-500/80 text-white text-sm
                             px-4 py-3 rounded-xl text-center">
               {error}
             </div>
           )}
-          <p className="text-white text-xl font-medium 
+          <p className="text-white text-xl font-medium
                         text-center">
             Tap anywhere to start
           </p>

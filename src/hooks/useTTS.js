@@ -2,25 +2,35 @@ import { useRef, useState, useCallback, useEffect } from 'react';
 import { textToSpeech } from '../services/openai';
 
 /**
- * useTTS — plays OpenAI TTS audio via AudioContext (iOS-compatible).
+ * useTTS — two voices optimised for their use case:
  *
- * iOS blocks audio after any `await` unless the AudioContext was
- * created/resumed synchronously inside a direct user tap.
+ * navigate mode → speakNavigate(text)
+ *   Uses browser speechSynthesis: zero network delay, speaks the instant
+ *   GPT responds. Slightly robotic voice but timing accuracy matters more.
  *
- * Pattern:
- *   1. Call unlock() inside your Start/Enable button's onClick (synchronous).
- *   2. After that, speak() works even after async API calls.
+ * ask mode → speak(text)
+ *   Uses OpenAI TTS (Nova voice) via AudioContext: higher quality, natural
+ *   voice for longer answers where a small delay is acceptable.
  *
- * Errors are thrown so callers can display them — nothing is swallowed silently.
+ * Both respect the same clash/interrupt rules:
+ *   speak(text)                  — skips if already speaking
+ *   speak(text, { urgent:true }) — interrupts immediately (obstacles)
+ *   stop()                       — cuts any audio mid-sentence
+ *
+ * iOS note: call unlock() synchronously inside your Start button onClick
+ * before any async work — this unblocks AudioContext for OpenAI TTS.
+ * Browser speechSynthesis does NOT need unlocking.
  */
 export function useTTS() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isUnlocked, setIsUnlocked] = useState(false);
+
+  // OpenAI TTS (Ask mode)
   const ctxRef = useRef(null);
   const sourceRef = useRef(null);
   const resolveRef = useRef(null);
 
-  /** Call this synchronously inside a button onClick to unblock iOS audio. */
+  // ── unlock AudioContext for OpenAI TTS (call on Start button tap) ─────────
   const unlock = useCallback(() => {
     if (!ctxRef.current) {
       const AudioCtx = window.AudioContext || /** @type {any} */ (window).webkitAudioContext;
@@ -32,8 +42,9 @@ export function useTTS() {
     setIsUnlocked(true);
   }, []);
 
-  /** Stop and resolve any currently playing audio. */
+  // ── stop any currently playing audio (works for both engines) ────────────
   const stop = useCallback(() => {
+    // stop OpenAI TTS
     if (sourceRef.current) {
       try { sourceRef.current.stop(); } catch (_) {}
       sourceRef.current = null;
@@ -42,24 +53,50 @@ export function useTTS() {
       resolveRef.current();
       resolveRef.current = null;
     }
+    // stop browser speechSynthesis
+    window.speechSynthesis.cancel();
+
     setIsSpeaking(false);
   }, []);
 
+  // ── Navigate: browser speechSynthesis (instant, no API call) ─────────────
   /**
-   * Fetch TTS audio and play it.
-   * Returns a Promise that resolves when playback finishes (or is stopped).
-   * Throws if the API call fails — callers should catch and display the error.
+   * @param {string} text
+   * @param {{ urgent?: boolean }} options
    */
-  const speak = useCallback(async (text) => {
-    stop();
+  const speakNavigate = useCallback((text, { urgent = false } = {}) => {
+    if (isSpeaking && !urgent) return; // non-urgent: drop if busy
 
+    window.speechSynthesis.cancel(); // clear any queued utterances
+    setIsSpeaking(false);
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 1.1;   // slightly faster for navigation
+    utterance.pitch = 1;
+    utterance.volume = 1;
+
+    utterance.onstart = () => setIsSpeaking(true);
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+
+    window.speechSynthesis.speak(utterance);
+  }, [isSpeaking]);
+
+  // ── Ask: OpenAI TTS Nova (quality voice for longer answers) ──────────────
+  /**
+   * @param {string} text
+   * @param {{ urgent?: boolean }} options
+   */
+  const speak = useCallback(async (text, { urgent = false } = {}) => {
     const ctx = ctxRef.current;
     if (!ctx) {
       throw new Error('Audio not unlocked yet — call unlock() on a button tap first.');
     }
 
-    // Throws on API error (e.g. 429) — let it propagate to the caller
-    const url = await textToSpeech(text);
+    if (isSpeaking && !urgent) return;
+    if (urgent) stop();
+
+    const url = await textToSpeech(text); // throws on API error (e.g. 429)
 
     try {
       const arrayBuffer = await fetch(url).then(r => r.arrayBuffer());
@@ -89,13 +126,14 @@ export function useTTS() {
       setIsSpeaking(false);
       throw err;
     }
-  }, [stop]);
+  }, [stop, isSpeaking]);
 
   useEffect(() => {
     return () => {
+      window.speechSynthesis.cancel();
       try { ctxRef.current?.close(); } catch (_) {}
     };
   }, []);
 
-  return { speak, stop, isSpeaking, isUnlocked, unlock };
+  return { speak, speakNavigate, stop, isSpeaking, isUnlocked, unlock };
 }
