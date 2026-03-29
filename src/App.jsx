@@ -16,6 +16,7 @@ export default function App() {
 
   const isSpeakingRef = useRef(false)
   const isAskingRef = useRef(false)
+  const analyzingRef = useRef(false)
   const lastTapRef = useRef(0)
   const DOUBLE_TAP_DELAY = 300
 
@@ -36,25 +37,25 @@ export default function App() {
       unlock()
       await startCamera()
       setMode('navigating')
-      await speak('VoiceGuide started. Navigating.')
+      speakNavigate('VoiceGuide started. Navigating.') // instant browser TTS — loop starts immediately
 
       startLoop(async (frame) => {
-        // use window.speechSynthesis.speaking so the check is always live —
-        // isSpeakingRef can't track browser speechSynthesis state reliably
-        if (window.speechSynthesis.speaking || isAskingRef.current) return
+        // analyzingRef prevents overlapping API calls; pause only during Q&A
+        if (isAskingRef.current || analyzingRef.current) return
 
-        const result = await analyzeFrame(frame, 'navigate')
-
-        if (result.isClear) return
-
-        if (result.isAlert) {
-          // urgent: cuts any current speech immediately
-          speakNavigate(result.text, { urgent: true })
-          return
+        analyzingRef.current = true
+        try {
+          const result = await analyzeFrame(frame, 'navigate')
+          if (!result.isClear) {
+            if (result.isAlert) {
+              speakNavigate(result.text, { urgent: true }) // ALERT: always cut current speech
+            } else {
+              speakNavigate(result.text) // non-urgent: drop if already speaking, no clash
+            }
+          }
+        } finally {
+          analyzingRef.current = false
         }
-
-        // non-urgent: speakNavigate drops it if already speaking (no clash, no queue)
-        speakNavigate(result.text)
       })
     } catch (err) {
       setError('Camera access denied. Please allow camera and try again.')
@@ -68,11 +69,11 @@ export default function App() {
       isAskingRef.current = true
       stop()
       setMode('listening')
-      await speak('Listening')
+      speakNavigate('Listening') // instant — recording starts without waiting for audio
       try {
         await startRecording()
       } catch (err) {
-        await speak('Microphone access denied.')
+        speakNavigate('Microphone access denied.')
         setMode('navigating')
         isAskingRef.current = false
       }

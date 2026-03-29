@@ -65,13 +65,14 @@ export function useTTS() {
    * @param {{ urgent?: boolean }} options
    */
   const speakNavigate = useCallback((text, { urgent = false } = {}) => {
-    if (isSpeaking && !urgent) return; // non-urgent: drop if busy
+    // read window.speechSynthesis.speaking directly — isSpeaking state goes stale in async callbacks
+    if (window.speechSynthesis.speaking && !urgent) return;
 
-    window.speechSynthesis.cancel(); // clear any queued utterances
+    window.speechSynthesis.cancel(); // cut current speech before starting new one
     setIsSpeaking(false);
 
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.1;   // slightly faster for navigation
+    utterance.rate = 1.1;
     utterance.pitch = 1;
     utterance.volume = 1;
 
@@ -80,7 +81,7 @@ export function useTTS() {
     utterance.onerror = () => setIsSpeaking(false);
 
     window.speechSynthesis.speak(utterance);
-  }, [isSpeaking]);
+  }, []); // no deps — reads window.speechSynthesis.speaking live
 
   // ── Ask: OpenAI TTS Nova (quality voice for longer answers) ──────────────
   /**
@@ -93,7 +94,8 @@ export function useTTS() {
       throw new Error('Audio not unlocked yet — call unlock() on a button tap first.');
     }
 
-    if (isSpeaking && !urgent) return;
+    // check sourceRef.current (live) instead of isSpeaking state (can be stale after awaits)
+    if (sourceRef.current && !urgent) return;
     if (urgent) stop();
 
     const url = await textToSpeech(text); // throws on API error (e.g. 429)
@@ -126,7 +128,7 @@ export function useTTS() {
       setIsSpeaking(false);
       throw err;
     }
-  }, [stop, isSpeaking]);
+  }, [stop]);
 
   useEffect(() => {
     return () => {
