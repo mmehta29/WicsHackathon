@@ -5,65 +5,88 @@ import { useTTS } from './hooks/useTTS'
 import { useSTT } from './hooks/useSTT'
 import CameraView from './components/CameraView'
 import StatusBanner from './components/StatusBanner'
-import AskButton from './components/AskButton'
 
 export default function App() {
   const [mode, setMode] = useState('idle')
-  const { videoRef, canvasRef, startCamera, startLoop, stopLoop, captureFrame } = useCamera()
+  const [error, setError] = useState(null)
+  const { videoRef, canvasRef, startCamera, startLoop, captureFrame } = useCamera()
   const { analyzeFrame } = useVisionAI()
   const { speak, speakNavigate, stop, unlock } = useTTS()
   const { startRecording, stopRecording, transcript, isTranscribing } = useSTT()
 
   const isSpeakingRef = useRef(false)
   const isAskingRef = useRef(false)
+  const lastTapRef = useRef(0)
+  const DOUBLE_TAP_DELAY = 300
 
-  async function handleStart() {
-    unlock()
-    await startCamera()
-    setMode('navigating')
+  function handleScreenTap() {
+    const now = Date.now()
+    const timeSinceLastTap = now - lastTapRef.current
+    lastTapRef.current = now
 
-    startLoop(async (frame) => {
-      // skip if asking or browser is currently speaking
-      if (window.speechSynthesis.speaking || isAskingRef.current) return
-
-      const result = await analyzeFrame(frame, 'navigate')
-
-      if (result.isClear) return
-
-      if (result.isAlert) {
-        speakNavigate(result.text, { urgent: true })
-        return
-      }
-
-      speakNavigate(result.text)
-    })
+    if (timeSinceLastTap < DOUBLE_TAP_DELAY) {
+      handleDoubleTap()
+    } else if (mode === 'idle') {
+      handleStart()
+    }
   }
 
-  async function handleAskTap() {
-    // if currently listening — stop recording
-    if (mode === 'listening') {
-      stopRecording()
-      return
-    }
+  async function handleStart() {
+    try {
+      unlock()
+      await startCamera()
+      setMode('navigating')
+      await speak('VoiceGuide started. Navigating.')
 
-    // if navigating — start asking
+      startLoop(async (frame) => {
+        // use window.speechSynthesis.speaking so the check is always live —
+        // isSpeakingRef can't track browser speechSynthesis state reliably
+        if (window.speechSynthesis.speaking || isAskingRef.current) return
+
+        const result = await analyzeFrame(frame, 'navigate')
+
+        if (result.isClear) return
+
+        if (result.isAlert) {
+          // urgent: cuts any current speech immediately
+          speakNavigate(result.text, { urgent: true })
+          return
+        }
+
+        // non-urgent: speakNavigate drops it if already speaking (no clash, no queue)
+        speakNavigate(result.text)
+      })
+    } catch (err) {
+      setError('Camera access denied. Please allow camera and try again.')
+    }
+  }
+
+  async function handleDoubleTap() {
+    if (mode === 'idle') return
+
     if (mode === 'navigating') {
       isAskingRef.current = true
-      stop() // stop any current navigation audio
+      stop()
       setMode('listening')
-
+      await speak('Listening')
       try {
         await startRecording()
       } catch (err) {
-        console.error('Mic error:', err)
+        await speak('Microphone access denied.')
         setMode('navigating')
         isAskingRef.current = false
       }
+      return
+    }
+
+    if (mode === 'listening') {
+      console.log('stopping recording...')
+      stopRecording()
     }
   }
 
-  // watch for transcript to be ready after recording stops
   useEffect(() => {
+    console.log('useEffect triggered:', { isTranscribing, transcript, mode })
     if (!isTranscribing && transcript && mode === 'listening') {
       handleAnswer(transcript)
     }
@@ -71,48 +94,54 @@ export default function App() {
 
   async function handleAnswer(question) {
     setMode('answering')
+    await speak('Got it, finding answer.')
 
     try {
-      // capture current frame
       const frame = captureFrame()
       if (!frame) throw new Error('No frame available')
 
-      // get answer from GPT-4o
       const result = await analyzeFrame(frame, 'ask', question)
 
-      // speak the answer
       isSpeakingRef.current = true
       await speak(result.text)
 
     } catch (err) {
       console.error('Answer error:', err)
+      await speak('Sorry, could not get an answer. Try again.')
     } finally {
       isSpeakingRef.current = false
       isAskingRef.current = false
       setMode('navigating')
+      speak('Resuming navigation.')
     }
   }
 
   return (
-    <div className="relative w-screen h-screen bg-black">
+    <div
+      className="relative w-screen h-screen bg-black"
+      onClick={handleScreenTap}
+    >
       <CameraView videoRef={videoRef} canvasRef={canvasRef} />
       <StatusBanner mode={mode} />
 
       {mode === 'idle' && (
-        <div className="absolute inset-0 flex items-center 
-                        justify-center">
-          <button
-            onClick={handleStart}
-            className="w-24 h-24 rounded-full bg-white 
-                       text-black font-medium active:scale-95 
-                       transition-transform"
-          >
-            Start
-          </button>
+        <div className="absolute inset-0 flex flex-col
+                        items-center justify-center gap-6 p-8">
+          {error && (
+            <div className="bg-red-500/80 text-white text-sm
+                            px-4 py-3 rounded-xl text-center">
+              {error}
+            </div>
+          )}
+          <p className="text-white text-xl font-medium
+                        text-center">
+            Tap anywhere to start
+          </p>
+          <p className="text-white/50 text-sm text-center">
+            Double tap to ask a question
+          </p>
         </div>
       )}
-
-      <AskButton mode={mode} onTap={handleAskTap} />
     </div>
   )
 }
