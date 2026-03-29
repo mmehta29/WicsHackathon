@@ -19,17 +19,14 @@ export default function App() {
   const lastTapRef = useRef(0)
   const DOUBLE_TAP_DELAY = 300
 
-  // detect double tap anywhere on screen
   function handleScreenTap() {
     const now = Date.now()
     const timeSinceLastTap = now - lastTapRef.current
     lastTapRef.current = now
 
     if (timeSinceLastTap < DOUBLE_TAP_DELAY) {
-      // double tap detected
       handleDoubleTap()
     } else if (mode === 'idle') {
-      // single tap on idle — start the app
       handleStart()
     }
   }
@@ -70,10 +67,8 @@ export default function App() {
   }
 
   async function handleDoubleTap() {
-    // if idle — ignore double tap
     if (mode === 'idle') return
 
-    // if navigating — start Ask
     if (mode === 'navigating') {
       isAskingRef.current = true
       stop()
@@ -89,14 +84,14 @@ export default function App() {
       return
     }
 
-    // if listening — stop recording
     if (mode === 'listening') {
+      console.log('stopping recording...')
       stopRecording()
     }
   }
 
-  // watch for transcript after recording stops
   useEffect(() => {
+    console.log('useEffect triggered:', { isTranscribing, transcript, mode })
     if (!isTranscribing && transcript && mode === 'listening') {
       handleAnswer(transcript)
     }
