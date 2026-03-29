@@ -11,7 +11,7 @@ export default function App() {
   const [mode, setMode] = useState('idle')
   const { videoRef, canvasRef, startCamera, startLoop, stopLoop, captureFrame } = useCamera()
   const { analyzeFrame } = useVisionAI()
-  const { speak, stop, unlock } = useTTS()
+  const { speak, speakNavigate, stop, unlock } = useTTS()
   const { startRecording, stopRecording, transcript, isTranscribing } = useSTT()
 
   const isSpeakingRef = useRef(false)
@@ -23,28 +23,19 @@ export default function App() {
     setMode('navigating')
 
     startLoop(async (frame) => {
-      // skip if asking or speaking
-      if (isSpeakingRef.current || isAskingRef.current) return
+      // skip if asking or browser is currently speaking
+      if (window.speechSynthesis.speaking || isAskingRef.current) return
 
       const result = await analyzeFrame(frame, 'navigate')
 
       if (result.isClear) return
 
       if (result.isAlert) {
-        stop()
-        isSpeakingRef.current = true
-        try {
-          await speak(result.text)
-        } finally {
-          isSpeakingRef.current = false
-        }
+        speakNavigate(result.text, { urgent: true })
         return
       }
 
-      isSpeakingRef.current = true
-      speak(result.text).finally(() => {
-        isSpeakingRef.current = false
-      })
+      speakNavigate(result.text)
     })
   }
 
